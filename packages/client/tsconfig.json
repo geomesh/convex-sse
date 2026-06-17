@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@geomesh/convex-sse-protocol": ["../protocol/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*", "test/**/*"]
+}

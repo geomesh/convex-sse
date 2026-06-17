@@ -1,0 +1,25 @@
+{
+  "name": "@geomesh/convex-sse-workspace",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "proxy"
+  ],
+  "scripts": {
+    "dev": "bun run --filter @geomesh/convex-sse-proxy dev",
+    "build": "bun run --filter @geomesh/convex-sse build",
+    "typecheck": "bun run --filter '*' typecheck",
+    "check": "biome check",
+    "check:fix": "biome check --write",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:worker": "vitest run --project worker"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.15",
+    "@cloudflare/vitest-pool-workers": "^0.16.16",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.0"
+  }
+}

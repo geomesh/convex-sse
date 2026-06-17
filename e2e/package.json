@@ -1,0 +1,9 @@
+{
+  "name": "@geomesh/convex-sse-e2e",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "convex": "1.38.0",
+    "eventsource": "^3.0.5"
+  }
+}

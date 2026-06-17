@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "convex-sse-proxy",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-01",
+  // No compatibility_flags: the worker path uses no Node built-ins.
+  "vars": {
+    "ALLOWED_BACKENDS": "*.convex.cloud",
+    "ALLOWED_ORIGINS": "*"
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "SESSIONS", "class_name": "SessionDurableObject" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SessionDurableObject"] }]
+}
