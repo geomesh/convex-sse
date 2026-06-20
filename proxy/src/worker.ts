@@ -1,13 +1,12 @@
 import { isBackendAllowed, isOriginAllowed, parseList } from "@geomesh/convex-sse-protocol";
 import { corsHeaders } from "./cors";
 
-// Permissive defaults when unset so a starter deployment works; set the vars to harden.
+export { SessionDurableObject } from "./session-do";
+
 function parseListOr(value: string | undefined, fallback: string[]): string[] {
   const list = parseList(value);
   return list.length > 0 ? list : fallback;
 }
-
-export { SessionDurableObject } from "./session-do";
 
 function withCors(response: Response, cors: Record<string, string>): Response {
   const headers = new Headers(response.headers);
@@ -38,7 +37,7 @@ export default {
       });
     }
 
-    // Defense-in-depth; Origin is spoofable, so the backend allowlist is the real control.
+    // Origin is spoofable; the backend allowlist is the real control.
     if (origin && !isOriginAllowed(origin, allowedOrigins)) {
       return new Response("origin not allowed", { status: 403, headers: cors });
     }

@@ -11,20 +11,28 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: publish-client
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v6
 
-      - uses: oven-sh/setup-bun@v2
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
-      - uses: actions/setup-node@v6
+      - name: Setup Node
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      - name: Install dependencies
+      - name: Install
         run: bun install --frozen-lockfile
 
       - name: Typecheck

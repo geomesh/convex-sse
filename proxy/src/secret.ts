@@ -12,9 +12,3 @@ export function timingSafeEqual(a: string, b: string): boolean {
   }
   return diff === 0;
 }
-
-export const SSE_HEADERS: Record<string, string> = {
-  "content-type": "text/event-stream",
-  "cache-control": "no-cache, no-transform",
-  "x-accel-buffering": "no",
-};

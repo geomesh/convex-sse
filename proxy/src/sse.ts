@@ -1,13 +1,19 @@
 import { encodeServerEvent, type ServerEvent, type SseSink } from "@geomesh/convex-sse-protocol";
 
+export const SSE_HEADERS: Record<string, string> = {
+  "content-type": "text/event-stream",
+  "cache-control": "no-cache, no-transform",
+  "x-accel-buffering": "no",
+};
+
 interface SseStream {
   stream: ReadableStream<Uint8Array>;
   sink: SseSink;
   onCancel(callback: () => void): void;
 }
 
-// Comment pings keep an idle stream under Cloudflare's 120s read timeout;
-// EventSource ignores comments, so the client never sees them.
+// Keepalive comments (": ping") keep idle streams under Cloudflare's ~120s read
+// timeout; EventSource ignores comments, so the client never sees them.
 export function createSseStream(keepaliveMs = 25_000): SseStream {
   const encoder = new TextEncoder();
   let controller: ReadableStreamDefaultController<Uint8Array> | null = null;

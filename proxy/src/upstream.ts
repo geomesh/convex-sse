@@ -8,7 +8,7 @@ export interface UpstreamHandlers {
 
 const CONNECT_TIMEOUT_MS = 10_000;
 
-export function cfConnectUpstream(backend: string, handlers: UpstreamHandlers): UpstreamSocket {
+export function connectUpstream(backend: string, handlers: UpstreamHandlers): UpstreamSocket {
   const httpUrl = backend.replace(/^ws/, "http");
   const controller = new AbortController();
   let ws: WebSocket | null = null;

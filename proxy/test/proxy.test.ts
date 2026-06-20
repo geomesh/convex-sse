@@ -1,9 +1,8 @@
 import { env, SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// Any *.convex.cloud host satisfies the worker's default ALLOWED_BACKENDS allowlist.
 const BACKEND = "wss://echo.convex.cloud/api/1.38.0/sync";
-// Must satisfy the worker's pinned ALLOWED_BACKENDS for full-path (SELF) tests.
-const ALLOWED_BACKEND = "wss://clean-lobster-724.eu-west-1.convex.cloud/api/1.38.0/sync";
 
 // Stand in for the upstream Convex deployment: intercept the DO's outbound
 // `fetch(Upgrade)` and return a 101 + WebSocketPair that echoes text frames.
@@ -240,14 +239,14 @@ describe("session round-trip", () => {
   });
 });
 
-// SELF drives the real Worker — the only path that covers withCors over a live
+// SELF drives the real Worker, the only path that covers withCors over a live
 // SSE body and session-id routing (the DO-stub tests above bypass both).
 describe("full worker path", () => {
   it("streams open/up_open/msg through withCors and routes /send by session id", async () => {
     mockUpstreamEcho();
     const sessionId = "self-e2e";
     const sse = await SELF.fetch(
-      `https://proxy.example/sse?sessionId=${sessionId}&backend=${encodeURIComponent(ALLOWED_BACKEND)}`,
+      `https://proxy.example/sse?sessionId=${sessionId}&backend=${encodeURIComponent(BACKEND)}`,
     );
     expect(sse.status).toBe(200);
     // withCors must preserve the SSE headers, not drop them in the re-wrap.
@@ -280,7 +279,7 @@ describe("full worker path", () => {
     env.ALLOWED_ORIGINS = "https://app.example";
     try {
       const res = await SELF.fetch(
-        `https://proxy.example/sse?sessionId=o&backend=${encodeURIComponent(ALLOWED_BACKEND)}`,
+        `https://proxy.example/sse?sessionId=o&backend=${encodeURIComponent(BACKEND)}`,
         { headers: { origin: "https://evil.example" } },
       );
       expect(res.status).toBe(403);
@@ -295,7 +294,7 @@ describe("full worker path", () => {
     env.ALLOWED_ORIGINS = "https://app.example";
     try {
       const sse = await SELF.fetch(
-        `https://proxy.example/sse?sessionId=no-origin&backend=${encodeURIComponent(ALLOWED_BACKEND)}`,
+        `https://proxy.example/sse?sessionId=no-origin&backend=${encodeURIComponent(BACKEND)}`,
       );
       expect(sse.status).toBe(200);
       await sse.body?.cancel();
@@ -311,7 +310,7 @@ describe("full worker path", () => {
   it("allows any Origin under the default wildcard ALLOWED_ORIGINS", async () => {
     mockUpstreamEcho();
     const sse = await SELF.fetch(
-      `https://proxy.example/sse?sessionId=wild&backend=${encodeURIComponent(ALLOWED_BACKEND)}`,
+      `https://proxy.example/sse?sessionId=wild&backend=${encodeURIComponent(BACKEND)}`,
       { headers: { origin: "https://anything.example" } },
     );
     expect(sse.status).toBe(200);

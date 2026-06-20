@@ -4,7 +4,7 @@ import {
   createConvexTransport,
   pickWebSocketConstructor,
   readTransportOverride,
-} from "../src/resilient";
+} from "../src/transport";
 
 const Proxied = class {} as unknown as typeof WebSocket;
 

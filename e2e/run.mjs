@@ -1,6 +1,6 @@
-// Drive a real Convex client against a real deployment — natively (control) or
-// through the SSE proxy — to confirm a live query resolves over the tunnel.
-// Exercises the built bundle, so run `bun run build` first.
+// Drive a real Convex client against a real deployment, natively (control) or
+// through the SSE proxy, to confirm a live query resolves over the tunnel.
+// Uses the built bundle, so run `bun run build` first.
 //   CONVEX_URL=https://<deployment>.convex.cloud node run.mjs [native|proxy]
 import { ConvexClient } from "convex/browser";
 import { anyApi } from "convex/server";
@@ -45,7 +45,7 @@ const unsubscribe = client.onUpdate(
   async (result) => {
     clearTimeout(deadline);
     const count = Array.isArray(result) ? result.length : 1;
-    console.log(`[${transport}] OK — ${query} resolved (${count} row(s))`);
+    console.log(`[${transport}] OK: ${query} resolved (${count} row(s))`);
     unsubscribe();
     await client.close();
     process.exit(0);

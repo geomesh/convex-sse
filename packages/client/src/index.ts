@@ -1,2 +1,2 @@
-export * from "./createProxiedWebSocketClass";
-export * from "./resilient";
+export * from "./proxied-websocket";
+export * from "./transport";

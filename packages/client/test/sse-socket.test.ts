@@ -1,6 +1,6 @@
 import type { ServerEvent } from "@geomesh/convex-sse-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { SimulatedWebSocket, type TransportDeps } from "../src/SimulatedWebSocket";
+import { SseSocket, type SseSocketDeps } from "../src/sse-socket";
 
 class FakeEventSource {
   onmessage: ((event: { data: string }) => void) | null = null;
@@ -73,11 +73,11 @@ function setup(opts?: {
     return { ok: !failNext, status: failNext ? 500 : 204 } as Response;
   }) as unknown as typeof globalThis.fetch;
 
-  const deps: TransportDeps = {
+  const deps: SseSocketDeps = {
     EventSourceCtor: FakeEventSource as unknown as typeof EventSource,
     fetch,
   };
-  const ws = new SimulatedWebSocket("https://proxy", deps, "wss://x.convex.cloud/api/1.38.0/sync", {
+  const ws = new SseSocket("https://proxy", deps, "wss://x.convex.cloud/api/1.38.0/sync", {
     connectMs: opts?.connectMs,
     postMs: opts?.postMs,
   });
@@ -99,7 +99,7 @@ function open(s: ReturnType<typeof setup>): void {
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-describe("SimulatedWebSocket", () => {
+describe("SseSocket", () => {
   it("opens an SSE stream to /sse carrying the backend", () => {
     const s = setup();
     expect(s.es().url).toContain("/sse");

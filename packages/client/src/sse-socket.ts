@@ -1,11 +1,11 @@
 import { parseServerEvent } from "@geomesh/convex-sse-protocol";
 
-export interface TransportDeps {
+export interface SseSocketDeps {
   EventSourceCtor: typeof EventSource;
   fetch: typeof fetch;
 }
 
-export interface TransportTimeouts {
+export interface SseSocketTimeouts {
   connectMs?: number;
   postMs?: number;
 }
@@ -13,16 +13,10 @@ export interface TransportTimeouts {
 const DEFAULT_CONNECT_MS = 30_000;
 const DEFAULT_POST_MS = 12_000;
 
-function timeoutSignal(ms: number): AbortSignal | undefined {
-  return typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
-    ? AbortSignal.timeout(ms)
-    : undefined;
-}
-
-type Listener = (event: SimEvent) => void;
-interface SimEvent {
+type Listener = (event: SocketEvent) => void;
+interface SocketEvent {
   type: string;
-  target: SimulatedWebSocket;
+  target: SseSocket;
   data?: unknown;
   code?: number;
   reason?: string;
@@ -30,7 +24,7 @@ interface SimEvent {
   message?: string;
 }
 
-export class SimulatedWebSocket {
+export class SseSocket {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
   static readonly CLOSING = 2;
@@ -49,7 +43,7 @@ export class SimulatedWebSocket {
   onerror: Listener | null = null;
 
   private readonly proxyUrl: string;
-  private readonly deps: TransportDeps;
+  private readonly deps: SseSocketDeps;
   private readonly connectMs: number;
   private readonly postMs: number;
   private readonly sessionId = globalThis.crypto.randomUUID();
@@ -59,7 +53,7 @@ export class SimulatedWebSocket {
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private sendChain: Promise<void> = Promise.resolve();
 
-  constructor(proxyUrl: string, deps: TransportDeps, url: string, timeouts?: TransportTimeouts) {
+  constructor(proxyUrl: string, deps: SseSocketDeps, url: string, timeouts?: SseSocketTimeouts) {
     this.proxyUrl = proxyUrl;
     this.deps = deps;
     this.url = url;
@@ -70,21 +64,20 @@ export class SimulatedWebSocket {
 
   send(data: string | ArrayBufferLike | ArrayBufferView | Blob): void {
     if (this.readyState !== this.OPEN) {
-      throw new Error("SimulatedWebSocket is not open");
+      throw new Error("socket is not open");
     }
     if (typeof data !== "string") {
-      throw new Error("SimulatedWebSocket only supports text frames");
+      throw new Error("only text frames are supported");
     }
-    // Serialize POSTs: parallel fetches can reorder over HTTP/2, and Convex's
-    // protocol is order-sensitive (the first frame must be Connect).
+    // Serialize POSTs: parallel fetches can reorder over HTTP/2, and Convex is
+    // order-sensitive (the first frame must be Connect).
     this.sendChain = this.sendChain.then(() => this.post("/send", { data }));
   }
 
   close(code = 1000, reason = ""): void {
     if (this.readyState === this.CLOSING || this.readyState === this.CLOSED) return;
     this.readyState = this.CLOSING;
-    // Order /close behind queued /send POSTs so a frame sent just before close()
-    // still reaches the proxy ahead of the upstream teardown.
+    // Chain /close behind queued sends so a frame sent just before close() still reaches the proxy first.
     if (this.secret) {
       this.sendChain = this.sendChain.then(() =>
         this.post("/close", { code, reason }, { keepalive: true }),
@@ -121,7 +114,7 @@ export class SimulatedWebSocket {
         this.emit("open", {});
         break;
       case "msg":
-        // A throwing consumer (bad frame) must reconnect, not be swallowed by EventSource.
+        // A throwing handler must trigger reconnect, not be swallowed by EventSource.
         try {
           this.emit("message", { data: event.data });
         } catch {
@@ -136,8 +129,8 @@ export class SimulatedWebSocket {
 
   private onTransportError(message: string): void {
     if (this.closeDispatched) return;
-    // Don't let EventSource silently reconnect: a fresh stream wouldn't carry
-    // this session's secret. Close hard and let Convex reconnect instead.
+    // EventSource would auto-reconnect, but a fresh stream lacks this session's secret;
+    // close hard and let Convex reconnect instead.
     this.emit("error", { message });
     this.dispatchClose(1006, message, false);
   }
@@ -159,7 +152,7 @@ export class SimulatedWebSocket {
     }
   }
 
-  private emit(type: string, props: Partial<SimEvent>): void {
+  private emit(type: string, props: Partial<SocketEvent>): void {
     const handler = (this as Record<string, unknown>)[`on${type}`];
     if (typeof handler === "function") {
       (handler as Listener).call(this, { type, target: this, ...props });
@@ -171,7 +164,7 @@ export class SimulatedWebSocket {
       .fetch(new URL(path, this.proxyUrl).toString(), {
         method: "POST",
         keepalive: opts?.keepalive ?? false,
-        signal: timeoutSignal(this.postMs),
+        signal: AbortSignal.timeout(this.postMs),
         headers: {
           "content-type": "application/json",
           "x-session-id": this.sessionId,

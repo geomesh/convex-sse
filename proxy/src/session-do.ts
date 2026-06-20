@@ -1,8 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 import { parseClientSend, SessionBridge } from "@geomesh/convex-sse-protocol";
-import { createSseStream } from "./sse";
-import { cfConnectUpstream } from "./upstream-cf";
-import { randomSecret, SSE_HEADERS, timingSafeEqual } from "./util";
+import { randomSecret, timingSafeEqual } from "./secret";
+import { createSseStream, SSE_HEADERS } from "./sse";
+import { connectUpstream } from "./upstream";
 
 export class SessionDurableObject extends DurableObject<Env> {
   private bridge: SessionBridge | null = null;
@@ -39,7 +39,7 @@ export class SessionDurableObject extends DurableObject<Env> {
         },
       },
     });
-    const upstream = cfConnectUpstream(backend, {
+    const upstream = connectUpstream(backend, {
       onOpen: () => bridge.handleUpstreamOpen(),
       onText: (data) => bridge.handleUpstreamText(data),
       onClose: (code, reason) => bridge.handleUpstreamClose(code, reason),

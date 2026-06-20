@@ -3,11 +3,9 @@
   "name": "convex-sse-proxy",
   "main": "src/worker.ts",
   "compatibility_date": "2026-06-01",
+  "observability": { "enabled": true },
+  "upload_source_maps": true,
   "routes": [{ "pattern": "ws-proxy.geomesh.de", "custom_domain": true }],
-  "vars": {
-    "ALLOWED_BACKENDS": "clean-lobster-724.eu-west-1.convex.cloud,tacit-ibis-952.eu-west-1.convex.cloud",
-    "ALLOWED_ORIGINS": "*"
-  },
   "durable_objects": {
     "bindings": [{ "name": "SESSIONS", "class_name": "SessionDurableObject" }]
   },

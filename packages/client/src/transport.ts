@@ -1,7 +1,4 @@
-import {
-  createProxiedWebSocketClass,
-  type ProxiedWebSocketDeps,
-} from "./createProxiedWebSocketClass";
+import { createProxiedWebSocketClass, type ProxiedWebSocketDeps } from "./proxied-websocket";
 
 export type Transport = "native" | "proxy";
 
@@ -14,7 +11,7 @@ export interface PickTransportOptions {
 }
 
 export function convexSyncUrl(convexUrl: string, version: string): string {
-  const i = convexUrl.search("://");
+  const i = convexUrl.indexOf("://");
   if (i === -1) throw new Error("convexUrl must be an absolute URL");
   const origin = convexUrl.substring(i + 3);
   const protocol = convexUrl.substring(0, i);
@@ -69,7 +66,7 @@ export async function pickWebSocketConstructor(
   if ((await probe(options.probeUrl, native, options.timeoutMs ?? 3000)) === "native") {
     return native;
   }
-  console.warn("[convex-sse] native WebSocket unreachable — falling back to the SSE proxy");
+  console.warn("[convex-sse] native WebSocket unreachable, falling back to the SSE proxy");
   return options.proxiedWebSocket;
 }
 
