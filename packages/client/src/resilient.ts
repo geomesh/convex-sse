@@ -1,21 +1,17 @@
-export type Transport = "native" | "proxy";
+import {
+  createProxiedWebSocketClass,
+  type ProxiedWebSocketDeps,
+} from "./createProxiedWebSocketClass";
 
-export interface StorageLike {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
+export type Transport = "native" | "proxy";
 
 export interface PickTransportOptions {
   probeUrl: string;
   nativeWebSocket?: typeof WebSocket;
   proxiedWebSocket: typeof WebSocket;
   timeoutMs?: number;
-  storage?: StorageLike | null;
-  storageKey?: string;
   override?: Transport | null;
 }
-
-const DEFAULT_KEY = "convex-sse:transport";
 
 export function convexSyncUrl(convexUrl: string, version: string): string {
   const i = convexUrl.search("://");
@@ -42,6 +38,7 @@ function probe(probeUrl: string, Native: typeof WebSocket, timeoutMs: number): P
       if (socket) {
         socket.onopen = null;
         socket.onerror = null;
+        socket.onclose = null;
         try {
           socket.close();
         } catch {}
@@ -57,6 +54,7 @@ function probe(probeUrl: string, Native: typeof WebSocket, timeoutMs: number): P
     }
     socket.onopen = () => finish("native");
     socket.onerror = () => finish("proxy");
+    socket.onclose = () => finish("proxy");
   });
 }
 
@@ -64,20 +62,38 @@ export async function pickWebSocketConstructor(
   options: PickTransportOptions,
 ): Promise<typeof WebSocket> {
   const native = options.nativeWebSocket ?? globalThis.WebSocket;
-  const key = options.storageKey ?? DEFAULT_KEY;
-  const pick = (t: Transport) => (t === "native" ? native : options.proxiedWebSocket);
-
   if (!native) return options.proxiedWebSocket;
-
   if (options.override) {
-    options.storage?.setItem(key, options.override);
-    return pick(options.override);
+    return options.override === "native" ? native : options.proxiedWebSocket;
   }
+  if ((await probe(options.probeUrl, native, options.timeoutMs ?? 3000)) === "native") {
+    return native;
+  }
+  console.warn("[convex-sse] native WebSocket unreachable — falling back to the SSE proxy");
+  return options.proxiedWebSocket;
+}
 
-  const cached = options.storage?.getItem(key);
-  if (cached === "native" || cached === "proxy") return pick(cached);
+export interface ConvexTransportOptions {
+  convexUrl: string;
+  version: string;
+  proxyUrl?: string;
+  search?: string;
+  timeoutMs?: number;
+  proxiedDeps?: ProxiedWebSocketDeps;
+}
 
-  const decision = await probe(options.probeUrl, native, options.timeoutMs ?? 3000);
-  options.storage?.setItem(key, decision);
-  return pick(decision);
+export async function createConvexTransport(
+  options: ConvexTransportOptions,
+): Promise<typeof WebSocket | undefined> {
+  if (!options.proxyUrl) return undefined;
+  return pickWebSocketConstructor({
+    probeUrl: convexSyncUrl(options.convexUrl, options.version),
+    proxiedWebSocket: createProxiedWebSocketClass(options.proxyUrl, options.proxiedDeps),
+    override: readTransportOverride(options.search ?? defaultSearch()),
+    timeoutMs: options.timeoutMs,
+  });
+}
+
+function defaultSearch(): string {
+  return typeof location !== "undefined" ? location.search : "";
 }

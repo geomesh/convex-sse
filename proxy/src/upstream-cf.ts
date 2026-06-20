@@ -6,38 +6,59 @@ export interface UpstreamHandlers {
   onClose(code: number, reason: string): void;
 }
 
+const CONNECT_TIMEOUT_MS = 10_000;
+
 export function cfConnectUpstream(backend: string, handlers: UpstreamHandlers): UpstreamSocket {
   const httpUrl = backend.replace(/^ws/, "http");
+  const controller = new AbortController();
+  let ws: WebSocket | null = null;
   let closed = false;
-  const close = (code: number, reason: string): void => {
+  const emitClose = (code: number, reason: string): void => {
     if (closed) return;
     closed = true;
     handlers.onClose(code, reason);
   };
 
-  const socket = fetch(httpUrl, { headers: { Upgrade: "websocket" } })
+  const timer = setTimeout(() => controller.abort(), CONNECT_TIMEOUT_MS);
+
+  fetch(httpUrl, { headers: { Upgrade: "websocket" }, signal: controller.signal })
     .then((res) => {
-      const ws = res.webSocket;
-      if (!ws) {
-        close(1006, `upstream did not upgrade (status ${res.status})`);
-        return null;
+      clearTimeout(timer);
+      const socket = res.webSocket;
+      if (!socket) {
+        emitClose(1006, `upstream did not upgrade (status ${res.status})`);
+        return;
       }
-      ws.accept();
-      ws.addEventListener("message", (event) => {
+      socket.accept();
+      socket.addEventListener("message", (event) => {
         if (typeof event.data === "string") handlers.onText(event.data);
       });
-      ws.addEventListener("close", (event) => close(event.code, event.reason));
-      ws.addEventListener("error", () => close(1006, "upstream error"));
+      socket.addEventListener("close", (event) => emitClose(event.code, event.reason));
+      socket.addEventListener("error", () => emitClose(1006, "upstream error"));
+      ws = socket;
       handlers.onOpen();
-      return ws;
     })
     .catch((error) => {
-      close(1006, String(error));
-      return null;
+      clearTimeout(timer);
+      emitClose(1006, controller.signal.aborted ? "upstream connect timeout" : String(error));
     });
 
   return {
-    sendText: (data) => void socket.then((ws) => ws?.send(data)),
-    close: (code, reason) => void socket.then((ws) => ws?.close(code, reason)),
+    sendText: (data) => {
+      try {
+        ws?.send(data);
+      } catch {}
+    },
+    close: (code, reason) => {
+      if (!ws) {
+        controller.abort();
+        return;
+      }
+      try {
+        ws.close(code, reason);
+      } catch {
+        ws.close();
+      }
+    },
   };
 }

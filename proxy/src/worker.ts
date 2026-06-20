@@ -1,5 +1,11 @@
-import { isBackendAllowed, parseList } from "@geomesh/convex-sse-protocol";
+import { isBackendAllowed, isOriginAllowed, parseList } from "@geomesh/convex-sse-protocol";
 import { corsHeaders } from "./cors";
+
+// Permissive defaults when unset so a starter deployment works; set the vars to harden.
+function parseListOr(value: string | undefined, fallback: string[]): string[] {
+  const list = parseList(value);
+  return list.length > 0 ? list : fallback;
+}
 
 export { SessionDurableObject } from "./session-do";
 
@@ -20,7 +26,9 @@ function route(env: Env, sessionId: string, request: Request): Promise<Response>
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    const cors = corsHeaders(request.headers.get("origin") ?? "", parseList(env.ALLOWED_ORIGINS));
+    const origin = request.headers.get("origin") ?? "";
+    const allowedOrigins = parseListOr(env.ALLOWED_ORIGINS, ["*"]);
+    const cors = corsHeaders(origin, allowedOrigins);
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
 
@@ -28,6 +36,11 @@ export default {
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...cors, "content-type": "application/json" },
       });
+    }
+
+    // Defense-in-depth; Origin is spoofable, so the backend allowlist is the real control.
+    if (origin && !isOriginAllowed(origin, allowedOrigins)) {
+      return new Response("origin not allowed", { status: 403, headers: cors });
     }
 
     if (url.pathname === "/sse") {
@@ -39,7 +52,7 @@ export default {
       if (!sessionId || !backend) {
         return new Response("missing sessionId or backend", { status: 400, headers: cors });
       }
-      if (!isBackendAllowed(backend, parseList(env.ALLOWED_BACKENDS))) {
+      if (!isBackendAllowed(backend, parseListOr(env.ALLOWED_BACKENDS, ["*.convex.cloud"]))) {
         return new Response("backend not allowed", { status: 403, headers: cors });
       }
       return withCors(await route(env, sessionId, request), cors);

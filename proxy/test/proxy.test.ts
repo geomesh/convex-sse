@@ -2,6 +2,8 @@ import { env, SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const BACKEND = "wss://echo.convex.cloud/api/1.38.0/sync";
+// Must satisfy the worker's pinned ALLOWED_BACKENDS for full-path (SELF) tests.
+const ALLOWED_BACKEND = "wss://clean-lobster-724.eu-west-1.convex.cloud/api/1.38.0/sync";
 
 // Stand in for the upstream Convex deployment: intercept the DO's outbound
 // `fetch(Upgrade)` and return a 101 + WebSocketPair that echoes text frames.
@@ -149,6 +151,55 @@ describe("session round-trip", () => {
     await events.cancel();
   });
 
+  it("emits up_close 1006 when the upstream does not upgrade", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("bad gateway", { status: 502 }));
+    const stub = sessionStub("no-upgrade");
+    const sse = await stub.fetch(`https://do/sse?sessionId=no-upgrade&backend=${BACKEND}`);
+    const events = readEvents(sse);
+    expect((await events.next()).type).toBe("open");
+    const close = await events.next();
+    expect(close.type).toBe("up_close");
+    expect(close.code).toBe(1006);
+    await events.cancel();
+  });
+
+  it("gracefully closes the open upstream (no abort/reset) with the client's code+reason", async () => {
+    let serverClose: { code: number; reason: string } | null = null;
+    let aborted = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input as RequestInfo, init);
+      if (request.headers.get("Upgrade") !== "websocket") {
+        return new Response("not found", { status: 404 });
+      }
+      // Aborting after upgrade would reset the socket instead of closing cleanly.
+      init?.signal?.addEventListener("abort", () => {
+        aborted = true;
+      });
+      const { 0: server, 1: client } = new WebSocketPair();
+      server.accept();
+      server.addEventListener("close", (event) => {
+        serverClose = { code: event.code, reason: event.reason };
+      });
+      return new Response(null, { status: 101, webSocket: client });
+    });
+
+    const stub = sessionStub("graceful-close");
+    const sse = await stub.fetch(`https://do/sse?sessionId=graceful-close&backend=${BACKEND}`);
+    const events = readEvents(sse);
+    const secret = (await events.next()).secret as string;
+    expect(await events.next()).toEqual({ type: "up_open" });
+
+    const closed = await stub.fetch("https://do/close", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-session-secret": secret },
+      body: JSON.stringify({ code: 1000, reason: "bye" }),
+    });
+    expect(closed.status).toBe(204);
+    await vi.waitFor(() => expect(serverClose).not.toBeNull());
+    expect(serverClose).toEqual({ code: 1000, reason: "bye" });
+    expect(aborted).toBe(false);
+  });
+
   it("buffers sends that arrive before upstream open, then flushes in order", async () => {
     let acceptUpstream = (): void => {};
     const gate = new Promise<void>((resolve) => {
@@ -186,5 +237,84 @@ describe("session round-trip", () => {
     expect(await events.next()).toEqual({ type: "msg", data: "two" });
     expect(await events.next()).toEqual({ type: "msg", data: "three" });
     await events.cancel();
+  });
+});
+
+// SELF drives the real Worker — the only path that covers withCors over a live
+// SSE body and session-id routing (the DO-stub tests above bypass both).
+describe("full worker path", () => {
+  it("streams open/up_open/msg through withCors and routes /send by session id", async () => {
+    mockUpstreamEcho();
+    const sessionId = "self-e2e";
+    const sse = await SELF.fetch(
+      `https://proxy.example/sse?sessionId=${sessionId}&backend=${encodeURIComponent(ALLOWED_BACKEND)}`,
+    );
+    expect(sse.status).toBe(200);
+    // withCors must preserve the SSE headers, not drop them in the re-wrap.
+    expect(sse.headers.get("content-type")).toBe("text/event-stream");
+    expect(sse.headers.get("x-accel-buffering")).toBe("no");
+
+    const events = readEvents(sse);
+    const open = await events.next();
+    expect(open.type).toBe("open");
+    const secret = open.secret as string;
+    expect(await events.next()).toEqual({ type: "up_open" });
+
+    const sent = await SELF.fetch("https://proxy.example/send", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-session-id": sessionId,
+        "x-session-secret": secret,
+      },
+      body: JSON.stringify({ data: "hello" }),
+    });
+    expect(sent.status).toBe(204);
+    // If withCors buffered the stream, this frame would never arrive.
+    expect(await events.next()).toEqual({ type: "msg", data: "hello" });
+    await events.cancel();
+  });
+
+  it("403s a disallowed Origin once ALLOWED_ORIGINS is configured", async () => {
+    const prev = env.ALLOWED_ORIGINS;
+    env.ALLOWED_ORIGINS = "https://app.example";
+    try {
+      const res = await SELF.fetch(
+        `https://proxy.example/sse?sessionId=o&backend=${encodeURIComponent(ALLOWED_BACKEND)}`,
+        { headers: { origin: "https://evil.example" } },
+      );
+      expect(res.status).toBe(403);
+    } finally {
+      env.ALLOWED_ORIGINS = prev;
+    }
+  });
+
+  it("never 403s a no-Origin request or /health, even with ALLOWED_ORIGINS configured", async () => {
+    mockUpstreamEcho();
+    const prev = env.ALLOWED_ORIGINS;
+    env.ALLOWED_ORIGINS = "https://app.example";
+    try {
+      const sse = await SELF.fetch(
+        `https://proxy.example/sse?sessionId=no-origin&backend=${encodeURIComponent(ALLOWED_BACKEND)}`,
+      );
+      expect(sse.status).toBe(200);
+      await sse.body?.cancel();
+      const health = await SELF.fetch("https://proxy.example/health", {
+        headers: { origin: "https://evil.example" },
+      });
+      expect(health.status).toBe(200);
+    } finally {
+      env.ALLOWED_ORIGINS = prev;
+    }
+  });
+
+  it("allows any Origin under the default wildcard ALLOWED_ORIGINS", async () => {
+    mockUpstreamEcho();
+    const sse = await SELF.fetch(
+      `https://proxy.example/sse?sessionId=wild&backend=${encodeURIComponent(ALLOWED_BACKEND)}`,
+      { headers: { origin: "https://anything.example" } },
+    );
+    expect(sse.status).toBe(200);
+    await sse.body?.cancel();
   });
 });

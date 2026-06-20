@@ -5,6 +5,20 @@ export interface TransportDeps {
   fetch: typeof fetch;
 }
 
+export interface TransportTimeouts {
+  connectMs?: number;
+  postMs?: number;
+}
+
+const DEFAULT_CONNECT_MS = 30_000;
+const DEFAULT_POST_MS = 12_000;
+
+function timeoutSignal(ms: number): AbortSignal | undefined {
+  return typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+    ? AbortSignal.timeout(ms)
+    : undefined;
+}
+
 type Listener = (event: SimEvent) => void;
 interface SimEvent {
   type: string;
@@ -16,8 +30,6 @@ interface SimEvent {
   message?: string;
 }
 
-// Implements the slice of WebSocket that Convex's client uses — text frames,
-// on{open,message,error,close} + send/close — over an SSE stream and HTTP POSTs.
 export class SimulatedWebSocket {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
@@ -38,16 +50,21 @@ export class SimulatedWebSocket {
 
   private readonly proxyUrl: string;
   private readonly deps: TransportDeps;
+  private readonly connectMs: number;
+  private readonly postMs: number;
   private readonly sessionId = globalThis.crypto.randomUUID();
   private es: EventSource | null = null;
   private secret: string | null = null;
   private closeDispatched = false;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private sendChain: Promise<void> = Promise.resolve();
 
-  constructor(proxyUrl: string, deps: TransportDeps, url: string) {
+  constructor(proxyUrl: string, deps: TransportDeps, url: string, timeouts?: TransportTimeouts) {
     this.proxyUrl = proxyUrl;
     this.deps = deps;
     this.url = url;
+    this.connectMs = timeouts?.connectMs ?? DEFAULT_CONNECT_MS;
+    this.postMs = timeouts?.postMs ?? DEFAULT_POST_MS;
     this.connect();
   }
 
@@ -69,7 +86,9 @@ export class SimulatedWebSocket {
     // Order /close behind queued /send POSTs so a frame sent just before close()
     // still reaches the proxy ahead of the upstream teardown.
     if (this.secret) {
-      this.sendChain = this.sendChain.then(() => this.post("/close", { code, reason }));
+      this.sendChain = this.sendChain.then(() =>
+        this.post("/close", { code, reason }, { keepalive: true }),
+      );
     }
     this.dispatchClose(code, reason, true);
   }
@@ -82,6 +101,7 @@ export class SimulatedWebSocket {
     this.es = es;
     es.onmessage = (event) => this.onServerFrame((event as MessageEvent).data as string);
     es.onerror = () => this.onTransportError("sse connection error");
+    this.connectTimer = setTimeout(() => this.onTransportError("connect timeout"), this.connectMs);
   }
 
   private onServerFrame(raw: string): void {
@@ -96,11 +116,17 @@ export class SimulatedWebSocket {
         this.secret = event.secret;
         break;
       case "up_open":
+        this.clearConnectTimer();
         this.readyState = this.OPEN;
         this.emit("open", {});
         break;
       case "msg":
-        this.emit("message", { data: event.data });
+        // A throwing consumer (bad frame) must reconnect, not be swallowed by EventSource.
+        try {
+          this.emit("message", { data: event.data });
+        } catch {
+          this.onTransportError("message handler threw");
+        }
         break;
       case "up_close":
         this.dispatchClose(event.code, event.reason, event.code === 1000);
@@ -119,10 +145,18 @@ export class SimulatedWebSocket {
   private dispatchClose(code: number, reason: string, wasClean: boolean): void {
     if (this.closeDispatched) return;
     this.closeDispatched = true;
+    this.clearConnectTimer();
     this.readyState = this.CLOSED;
     this.es?.close();
     this.es = null;
     this.emit("close", { code, reason, wasClean });
+  }
+
+  private clearConnectTimer(): void {
+    if (this.connectTimer !== null) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
+    }
   }
 
   private emit(type: string, props: Partial<SimEvent>): void {
@@ -132,11 +166,12 @@ export class SimulatedWebSocket {
     }
   }
 
-  private post(path: string, body: unknown): Promise<void> {
+  private post(path: string, body: unknown, opts?: { keepalive?: boolean }): Promise<void> {
     return this.deps
       .fetch(new URL(path, this.proxyUrl).toString(), {
         method: "POST",
-        keepalive: true,
+        keepalive: opts?.keepalive ?? false,
+        signal: timeoutSignal(this.postMs),
         headers: {
           "content-type": "application/json",
           "x-session-id": this.sessionId,

@@ -1,8 +1,13 @@
-import { SimulatedWebSocket, type TransportDeps } from "./SimulatedWebSocket";
+import {
+  SimulatedWebSocket,
+  type TransportDeps,
+  type TransportTimeouts,
+} from "./SimulatedWebSocket";
 
 export interface ProxiedWebSocketDeps {
   EventSourceCtor?: typeof EventSource;
   fetch?: typeof fetch;
+  timeouts?: TransportTimeouts;
 }
 
 export function createProxiedWebSocketClass(
@@ -13,10 +18,11 @@ export function createProxiedWebSocketClass(
     EventSourceCtor: deps?.EventSourceCtor ?? globalThis.EventSource,
     fetch: deps?.fetch ?? globalThis.fetch.bind(globalThis),
   };
+  const timeouts = deps?.timeouts;
 
   class ProxiedWebSocket extends SimulatedWebSocket {
     constructor(url: string | URL, _protocols?: string | string[]) {
-      super(proxyUrl, resolved, typeof url === "string" ? url : url.toString());
+      super(proxyUrl, resolved, typeof url === "string" ? url : url.toString(), timeouts);
     }
   }
 

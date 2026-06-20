@@ -4,9 +4,8 @@
   "main": "src/worker.ts",
   "compatibility_date": "2026-06-01",
   "routes": [{ "pattern": "ws-proxy.geomesh.de", "custom_domain": true }],
-  // No compatibility_flags: the worker path uses no Node built-ins.
   "vars": {
-    "ALLOWED_BACKENDS": "*.convex.cloud",
+    "ALLOWED_BACKENDS": "clean-lobster-724.eu-west-1.convex.cloud,tacit-ibis-952.eu-west-1.convex.cloud",
     "ALLOWED_ORIGINS": "*"
   },
   "durable_objects": {

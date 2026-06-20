@@ -1,6 +1,7 @@
 {
   "name": "@geomesh/convex-sse",
-  "version": "0.1.0",
+  "version": "0.3.0",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/geomesh/convex-sse.git",
@@ -21,7 +22,7 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build:js": "bun build ./src/index.ts --target browser --format esm --outdir dist",
+    "build:js": "bun build ./src/index.ts --target browser --format esm --sourcemap=external --outdir dist",
     "build:types": "dts-bundle-generator -o dist/index.d.ts src/index.ts",
     "build": "bun run build:js && bun run build:types",
     "typecheck": "tsc --noEmit"

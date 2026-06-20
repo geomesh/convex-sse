@@ -60,31 +60,35 @@ Durable Object by `x-session-id` and authorized by the per-session `secret`
 
 ## Wire it into an app
 
-Install (`bun add @geomesh/convex-sse@file:../convex-sse/packages/client`), then
-pick the transport at boot and hand it to Convex:
+Install (`bun add @geomesh/convex-sse`), then resolve the transport at boot and
+hand it to Convex. `createConvexTransport` probes native-vs-proxy on boot, honours
+a `?transport=` override, and returns `undefined` when no proxy is configured so
+open-network users keep native WebSockets with no penalty:
 
 ```ts
 import { version } from "convex";
 import { ConvexReactClient } from "convex/react";
-import {
-  convexSyncUrl,
-  createProxiedWebSocketClass,
-  pickWebSocketConstructor,
-  readTransportOverride,
-} from "@geomesh/convex-sse";
+import { createConvexTransport } from "@geomesh/convex-sse";
 
-const webSocketConstructor = await pickWebSocketConstructor({
-  probeUrl: convexSyncUrl(convexUrl, version),
-  proxiedWebSocket: createProxiedWebSocketClass(sseProxyUrl),
-  storage: window.sessionStorage,
-  override: readTransportOverride(window.location.search),
+const webSocketConstructor = await createConvexTransport({
+  convexUrl,
+  version,                 // convex's exported version; the probe needs /api/<version>/sync
+  proxyUrl: sseProxyUrl,   // omit to force native (no probe)
 });
 
-const convex = new ConvexReactClient(convexUrl, { webSocketConstructor });
+const convex = new ConvexReactClient(
+  convexUrl,
+  webSocketConstructor ? { webSocketConstructor } : undefined,
+);
 ```
 
 No backend, schema, hook, or component changes. Force a transport while testing
-with `?transport=proxy` or `?transport=native`.
+with `?transport=proxy` or `?transport=native`. Construct the client *after* the
+`await`; the probe adds up to `timeoutMs` (default 3s) only on a WS-blocked
+network, so render a loading shell if that matters to you.
+
+For lower-level control, `createProxiedWebSocketClass(proxyUrl)` (always proxy)
+and `pickWebSocketConstructor(...)` (manual probe wiring) remain exported.
 
 ## Develop
 
@@ -102,6 +106,19 @@ deployment — see `e2e/README.md`.
 
 ## Caveats
 
+- **Threat model — WebSocket-stripping firewalls only.** This tunnels *only* the
+  Convex sync WebSocket (live queries, mutations, the `Authenticate` frame). The
+  Convex client still talks plain HTTPS straight to `*.convex.cloud` for some
+  paths — notably `@convex-dev/auth`'s background **token refresh** (a direct
+  `POST /api/action` via an internal `ConvexHttpClient` the transport swap can't
+  reach). That's fine for a firewall that strips the WS `Upgrade` but allows
+  HTTPS. A firewall that blocks the convex.cloud **domain** wholesale leaves the
+  app half-working (queries/mutations tunnel, refresh fails → the editor is
+  silently logged out). Proxying `/api/*` is out of scope here.
+- **Open-relay control.** `ALLOWED_BACKENDS` is the load-bearing limit on which
+  Convex deployments the worker will dial; pin it to your deployment host (not
+  `*.convex.cloud`). `ALLOWED_ORIGINS` adds a browser-facing Origin gate. Both
+  fall back to permissive defaults when unset so a starter setup works instantly.
 - **SSE buffering**: the Worker sets `text/event-stream` + `x-accel-buffering: no`
   and no compression to defeat proxy buffering; a firewall that still buffers
   can't be helped by SSE.

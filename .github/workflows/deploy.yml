@@ -3,6 +3,11 @@ name: Deploy proxy to Cloudflare Workers
 on:
   push:
     branches: [main]
+    paths:
+      - "proxy/**"
+      - "packages/protocol/**"
+      - "bun.lock"
+      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 permissions:
